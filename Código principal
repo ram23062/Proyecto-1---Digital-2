@@ -1,0 +1,269 @@
+#include <Arduino.h>
+#include <stdint.h>
+#include "config.h"
+#include "display7.h"
+
+#define sensor 32
+#define btt1 13
+#define led_r 1
+#define led_a 5
+#define led_v 2
+#define servo 12
+#define pwmChannel1 0
+#define pwmChannel2 1
+#define pwmChannel3 2
+#define pwmChannel4 3
+#define display1 16
+#define display2 15
+#define display3 22
+
+// vARIABLES GLOBALES
+float temperatura = 0;           // Y(0)
+float adcFiltrado; // S(0) = Y(0)
+double alpha = 0.05;             // Factor de suavizado (0-1) Entre más alto más rápido será pero no filtrará de mejor manera
+int posicion_servo = 2;
+float Celsius = 0;
+float prom;
+
+
+// Seperación de los dígitos de temperatura
+unsigned int valor = 0;
+unsigned int decenas = 0;
+unsigned int unidades = 0;
+unsigned int decimal = 0;
+// Adafruit IO
+/*
+#define IO_LOOP_DELAY 5000
+unsigned long lastUpdate = 0;
+
+
+// set up the 'counter' feed
+AdafruitIO_Feed *canalTemperatura = io.feed("temperatura");
+//AdafruitIO_Feed *canalBoton = io.feed("boton");
+*/
+
+// Posibles posiciones del servo
+const int posiciones[3] = {3277, 4915, 6553};
+
+// Prototipo de funciones
+void senal(void);
+void LEDS(void);
+void indicador_servo(void);
+
+void initbtt1(void);
+void IRAM_ATTR btt1_ISR(void);
+volatile bool btt_state1;
+volatile uint32_t last_btt_state1 = 0;
+
+// Anti-rebote btt1
+void IRAM_ATTR btt1_ISR(void)
+{
+  uint32_t tiempo_rebote1 = millis();
+  if (tiempo_rebote1 - last_btt_state1 > 50)
+  {
+    btt_state1 = true;
+    last_btt_state1 = tiempo_rebote1;
+  }
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  while (!Serial)
+    ;
+  /*
+  //Configuración de adafruit.io
+  Serial.print("Connecting to Adafruit IO");
+
+  // connect to io.adafruit.com
+  io.connect();
+  //counter->onMessage(handleMessage);
+  //canalBoton->onMessage(handleMessage);
+  // wait for a connection
+  while(io.status() < AIO_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  // we are connected
+  Serial.println();
+  Serial.println(io.statusText());
+  //counter->get();
+  //canalBoton->get();
+ */
+  // Configuración de los pines del display
+  display7();
+
+  // Configuración de los transistores para los displays
+  pinMode(display1, OUTPUT);
+  pinMode(display2, OUTPUT);
+  pinMode(display3, OUTPUT);
+
+  // Apago todos los displays
+  digitalWrite(display1, LOW);
+  digitalWrite(display2, LOW);
+  digitalWrite(display3, LOW);
+
+  // Configuración de la LED azul
+  ledcSetup(pwmChannel1, 100, 12);
+  ledcAttachPin(led_r, pwmChannel1);
+
+  // Configuración de la LED verde
+  ledcSetup(pwmChannel2, 100, 12);
+  ledcAttachPin(led_v, pwmChannel2);
+
+  // Configuración de la LED roja
+  ledcSetup(pwmChannel3, 100, 12);
+  ledcAttachPin(led_a, pwmChannel3);
+
+  // Configuración del Servo
+  ledcSetup(pwmChannel4, 50, 16);
+  ledcAttachPin(servo, pwmChannel4);
+
+  // Estado inicial
+  ledcWrite(pwmChannel1, 0);
+  ledcWrite(pwmChannel2, 0);
+  ledcWrite(pwmChannel3, 0);
+  ledcWrite(pwmChannel4, posiciones[posicion_servo]);
+
+  // Lectura inicial para el filtro
+  temperatura = analogRead(sensor);
+  adcFiltrado = temperatura;
+  // Inicialización de las funciones
+  initbtt1();
+
+  
+}
+
+void loop()
+{
+  // Se mantiene conectado al servidor de Adafruit IO
+  // io.run();
+  senal();
+
+  Serial.print("Temperatura:");
+  Serial.println(Celsius);
+  // delay(10);
+
+  if (btt_state1 == true)
+  {
+    // Reseteo del estado del botón
+    btt_state1 = false;
+    LEDS();
+    indicador_servo();
+    // Seperación de los dígitos de temperatura
+  valor = Celsius * 100;
+  decenas = valor / 100;
+  valor = valor - (decenas * 100);
+  unidades = valor / 10;
+  valor = valor - (unidades * 10);
+  decimal = valor;
+  
+  // Display 1
+    digitalWrite(display2, LOW);
+    digitalWrite(display3, LOW);
+    digitalWrite(display1, HIGH);
+    mostrarNumero(decenas);
+    mostrarPunto(0);
+    delay(5);
+    // Display 2
+    digitalWrite(display1, LOW);
+    digitalWrite(display3, LOW);
+    digitalWrite(display2, HIGH);
+    mostrarNumero(unidades);
+    mostrarPunto(1);
+    delay(5);
+    // Display 3
+    digitalWrite(display2, LOW);
+    digitalWrite(display1, LOW);
+    digitalWrite(display3, HIGH);
+    mostrarNumero(decimal);
+    mostrarPunto(0); // Punto decimal en el último display
+    delay(5); 
+    Serial.print("Temperatura:");
+    Serial.println(Celsius);
+  }
+
+  /*
+  if (millis() > (lastUpdate + IO_LOOP_DELAY)) {
+    // save count to the 'counter' feed on Adafruit IO
+    Serial.print("sending -> ");
+    Serial.println(adcFiltrado);
+    //Se publica el valor del ADC filtrado
+    canalTemperatura->save(Celsius);
+
+    // after publishing, store the current time
+    lastUpdate = millis();
+  }
+  */
+}
+
+// Otras funciones
+// Funciones de interrupción para los botones
+void initbtt1(void)
+{
+  pinMode(btt1, INPUT);
+  attachInterrupt(btt1, &btt1_ISR, RISING);
+}
+// Obtención de la señal
+void senal(void)
+{
+  /*
+  temperatura = analogRead(sensor);
+  adcFiltrado = (alpha * temperatura) + ((1.0 - alpha) * adcFiltrado);
+  // Mapeo directo de bits a Celsius CON ALIMENTACIÓN DE 5V
+  float voltaje = (adcFiltrado * 5) / 4095.0;
+  Celsius = voltaje * 100.0; // 10mV/°C -> multiplicar por 100
+  // Asegurar que la temperatura está dentro del rango del sensor
+  Celsius = constrain(Celsius, -55, 150);
+  */
+  int numeroLecturas=10;
+  int sumaLecturas=0;
+  for (int k=0; k<numeroLecturas; k++){
+    sumaLecturas+=analogRead(sensor);
+    delay(1);
+  }
+  prom=sumaLecturas/(numeroLecturas*1.0);
+  float voltaje = prom*(5/4095.0); 
+  Celsius = (voltaje*100);
+}
+void LEDS(void)
+{
+
+  // Encender LED según rango de temperatura
+  if (Celsius < 22.0)
+  {
+    ledcWrite(pwmChannel2, 4095); // Verde
+    ledcWrite(pwmChannel1, 0);
+    ledcWrite(pwmChannel3, 0);
+  }
+  if (Celsius >= 22.0 && Celsius < 25.0)
+  {
+    ledcWrite(pwmChannel3, 4095); // Amarillo
+    ledcWrite(pwmChannel1, 0);
+    ledcWrite(pwmChannel2, 0);
+  }
+  if (Celsius > 25)
+  {
+    ledcWrite(pwmChannel1, 4095); // Rojo
+    ledcWrite(pwmChannel2, 0);
+    ledcWrite(pwmChannel3, 0);
+  }
+}
+
+void indicador_servo(void)
+{
+  if (Celsius < 22.0)
+  {
+    posicion_servo = 2; // Frío (135°)
+  }
+  else if (Celsius >= 22.0 && Celsius < 25.0)
+  {
+    posicion_servo = 1; // Normal (90°)
+  }
+  else if (Celsius >= 25.0)
+  {
+    posicion_servo = 0; // Caliente (45°)
+  }
+  ledcWrite(pwmChannel4, posiciones[posicion_servo]);
+}
