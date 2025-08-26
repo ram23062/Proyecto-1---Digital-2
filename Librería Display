@@ -1,0 +1,28 @@
+#ifndef __DISPLAY7_H__
+#define __DISPLAY7_H__
+
+
+#include<Arduino.h>
+#include<stdint.h>
+
+#define dA 25
+#define dB 33
+#define dC 18
+#define dD 3
+#define dE 21
+#define dF 26
+#define dG 27
+#define dP 19
+
+//Función para configurar display 7 segmentos
+void display7(void);
+
+//Desplegar numero en display 7 segmentos
+void mostrarNumero(uint8_t numero);
+
+//Desplegar punto(1 se despliega y 0 no se despliega)
+
+void mostrarPunto(u_int8_t punto);
+
+
+#endif // __DISPLAY7_H__
