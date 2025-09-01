@@ -26,8 +26,12 @@ float prom;
 // Variables volátiles
 volatile bool btt_state1;
 volatile uint32_t last_btt_state1 = 0;
+volatile int posicion=0;
 
-// Seperación de los dígitos de temperatura
+//Timer para multiplexado de display
+hw_timer_t *timer=NULL;
+
+// Separación de los dígitos de temperatura
 unsigned int valor = 0;
 unsigned int decenas = 0;
 unsigned int unidades = 0;
@@ -46,12 +50,16 @@ const int posiciones[3] = {3277, 4915, 6553};
 // Prototipo de funciones
 void senal(void);
 void LEDS(void);
-void indicador_servo(void);
+void indicador_servo(void
+// Interrupción para el botón
 void initbtt1(void);
 void IRAM_ATTR btt1_ISR(void);
+// Interrupción para el timer
+void initmultiplex(void);
+void IRAM_ATTR multiplex(void);
 
 
-// Rutina de interrupción para anti-rebote btt1
+// Rutinas de interrupción
 void IRAM_ATTR btt1_ISR(void)
 {
   uint32_t tiempo_rebote1 = millis();
@@ -60,6 +68,37 @@ void IRAM_ATTR btt1_ISR(void)
     btt_state1 = true;
     last_btt_state1 = tiempo_rebote1;
   }
+}
+
+//Multiplexación para los displays con timer
+void IRAM_ATTR multiplex(void){
+  if (posicion == 0) {
+    // Display 1
+    digitalWrite(display1, HIGH);
+    digitalWrite(display2, LOW);
+    digitalWrite(display3, LOW);
+    mostrarNumero(decenas);
+    mostrarPunto(0);
+    posicion = 1; //Se actualiza la posicion de encendido del display
+  }
+  else if (posicion == 1) {
+    // Display 2
+    digitalWrite(display1, LOW);
+    digitalWrite(display2, HIGH);
+    digitalWrite(display3, LOW);
+    mostrarNumero(unidades);
+    mostrarPunto(1);
+    posicion = 2; 
+  }
+  else {
+    // Display 3
+    digitalWrite(display1, LOW);
+    digitalWrite(display2, LOW);
+    digitalWrite(display3, HIGH);
+    mostrarNumero(decimal);
+    mostrarPunto(0);
+    posicion = 0;
+}
 }
 
 void setup()
@@ -123,6 +162,7 @@ void setup()
   
   // Inicialización de las funciones
   initbtt1();
+  initmultiplex();
 }
 
 void loop()
@@ -133,6 +173,7 @@ void loop()
   //Lectura constante de la señal de temperatura
   senal();
 
+  // Lectura del botón
   if (btt_state1 == true)
   {
     // Reseteo del estado del botón
@@ -149,29 +190,6 @@ void loop()
     valor = valor - (unidades * 10);
     decimal = valor;
   }
-  //Con las lecturas de los dígitos se asigan a cada display correspondiente
-  // Display 1
-    digitalWrite(display2, LOW);
-    digitalWrite(display3, LOW);
-    digitalWrite(display1, HIGH);
-    mostrarNumero(decenas);
-    mostrarPunto(0);
-    delay(5);
-  // Display 2
-    digitalWrite(display1, LOW);
-    digitalWrite(display3, LOW);
-    digitalWrite(display2, HIGH);
-    mostrarNumero(unidades);
-    mostrarPunto(1);
-    delay(5);
-  // Display 3
-    digitalWrite(display2, LOW);
-    digitalWrite(display1, LOW);
-    digitalWrite(display3, HIGH);
-    mostrarNumero(decimal);
-    mostrarPunto(0); // Punto decimal en el último display
-    delay(5); 
-
   //Se verifica la lectura de la temperatura
     Serial.print("Temperatura:");
     Serial.println(Celsius);
@@ -191,7 +209,7 @@ void loop()
 }
 
 // Otras funciones
-// Funciones de interrupción para los botones
+// Funciones de interrupción para el botón
 void initbtt1(void)
 {
   pinMode(btt1, INPUT);
@@ -209,6 +227,8 @@ void senal(void)
   float voltaje = (prom*5)/4095.0; 
   Celsius = (voltaje*100)+5; //Ajuste de la temperatura por la mala calibración
 }
+
+//Asignación de temperatura a los LEDS
 void LEDS(void)
 {
 
@@ -233,6 +253,7 @@ void LEDS(void)
   }
 }
 
+// Asignación de temperatura al servo
 void indicador_servo(void)
 {
   if (Celsius < 22.0)
@@ -248,4 +269,12 @@ void indicador_servo(void)
     posicion_servo = 0; // Caliente (45°)
   }
   ledcWrite(pwmChannel4, posiciones[posicion_servo]);
+}
+
+//Inicialización de los displays con timer
+void initmultiplex(void){
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &multiplex, true);
+  timerAlarmWrite(timer, 1000, true);
+  timerAlarmEnable(timer);
 }
